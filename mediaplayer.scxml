@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scxml xmlns="http://www.w3.org/2005/07/scxml" initial="media_player_off" version="1.0">
+    <state id="media_player_off">
+        <transition event="power" target="stopped"/>
+    </state>
+    <state id="media_player_on">
+        <state id="stopped">
+            <transition event="play" target="playing"/>
+        </state>
+        <state id="playing">
+            <transition event="stop" target="stopped"/>
+            <transition event="pause" target="paused"/>
+        </state>
+        <state id="paused">
+            <transition event="pause" target="playing"/>
+            <transition event="stop" target="stopped"/>
+        </state>
+        <transition event="power" target="media_player_off"/>
+    </state>
+</scxml>
