@@ -277,7 +277,7 @@ define(`AS_X',`dnl
 `'define(`ES',`S \nl')dnl
 ')
 
-divert(0)dnl
+divert(2)dnl
 #define ELEMENT_XS(P, X, S) \
 TAGS(`AS_X')
 
@@ -299,7 +299,7 @@ enum children
 };
 
 static unsigned mask;
-
+divert(3)dnl
 %%{
     machine token;
 
@@ -319,3 +319,7 @@ static unsigned mask;
                        ) >reset_mask S? ('/'? @pop_element '>') >push_element
                        ;
 }%%
+')dnl
+divert(0)dnl
+ifelse(variant,`c',`undivert(2)',`undivert(3)')dnl
+m4exit

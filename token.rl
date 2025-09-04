@@ -31,6 +31,10 @@ static enum enc {
     fprintf(stderr, "%s:%d: (%s) failed\n", __FILE__, __LINE__, #C); exit(1); \
 } else (void)0
 
+#include "element.h"
+
+enum element element;
+
 %%{
     machine token;
     access xml_;
@@ -274,17 +278,9 @@ static enum enc {
     ID = zlen;
     Boolean_expression = zlen;
     EventsTypes_datatype = zlen;
-}%%
 
-struct state
-{
-};
+    include "element.rl";
 
-.so token.inc
-
-enum element element;
-
-%%{
     elementActual2 = EmptyElemTagOrSTag | ETag;
     content = CharData?
             ((elementActual2 | Reference | CDSect | PI | Comment)
@@ -520,6 +516,8 @@ int main(void)
             write exec;
         }%%
     }
+
+    puts("List of entities:");
 
     puts("Events\tOccurrences");
 

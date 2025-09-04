@@ -5,15 +5,19 @@ OBJECT=rax.o
 
 all:test token
 
-token:token.c
-	$(CC) $(CFLAGS) -o $@ $<
+#token:token.c
+#	$(CC) $(CFLAGS) -o $@ $<
 
-token.rl:token.rl.pre token.inc
-	soelim -r token.rl.pre > $@
+token.rl:element.rl
 
-token.inc:token.m4
-	m4 $< | sed "s/@aq@/'/g" > $@
-# @aq@ is a quadrigraph. In groff, \(ac inserts a neutral apostrophe
+token.c:token.rl element.h
+
+element.h:element.m4
+	m4 -D variant=c $< > $@
+
+element.rl:element.m4
+	m4 -D variant=ragel $< | sed "s/@aq@/'/g" > $@
+# @aq@ is a quadrigraph. In groff, \(aq inserts a neutral apostrophe
 
 RAW_RAX=https://raw.githubusercontent.com/antirez/rax/1927550cb218ec3c3dda8b39d82d1d019bf0476d
 

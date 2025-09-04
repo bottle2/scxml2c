@@ -53,8 +53,6 @@ To solve the maintenance burden, M4 has been studied to generate both C and Rage
 My approach consists of keeping a list of SCXML elements, their attributes and possible children elements in [`token.m4`](token.m4),
 then this list is expanded several times to generate C enums, Ragel actions and Ragel machines.
 
-Unaware that Ragel has a source inclusion facility through the `include` and `import` statements, I used the troff tool `soelim` to insert the generated code among the remainder of C/Ragel code where the request `.so` occurs.
-
 [`Makefile`](Makefile) details and implements the entire pipeline.
 
 ## Entities
