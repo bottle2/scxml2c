@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE lala [
+    <!ENTITY % fuck "FUCK1">
+    <!ENTITY   fuck "FUCK2">
+    <!ENTITY   fuck "FUCK3">
+    <!ENTITY   lalaal "&amp; &quot; &lt; &gt; &apos;">
+]>
 <scxml xmlns="http://www.w3.org/2005/07/scxml" initial="media_player_off" version="1.0">
     <state id="media_player_off">
         <transition event="power" target="stopped"/>

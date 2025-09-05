@@ -297,8 +297,6 @@ enum children
 {
     TAGS(`AS_ENUM_CHILDREN')
 };
-
-static unsigned mask;
 divert(3)dnl
 %%{
     machine token;
@@ -319,7 +317,6 @@ divert(3)dnl
                        ) >reset_mask S? ('/'? @pop_element '>') >push_element
                        ;
 }%%
-')dnl
 divert(0)dnl
 ifelse(variant,`c',`undivert(2)',`undivert(3)')dnl
 m4exit
