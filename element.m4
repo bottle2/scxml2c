@@ -4,10 +4,20 @@ divert(-1)
 #       line of their own.
 #
 # TODO
-# - Allow internal entities inside element attributes
-#   https://github.com/ohler55/ox/issues/122
-#   - Probably easier is create third machine between unicode machine and XML machine
-# - Q macro becomes a list with special expansion
+# - Maybe we should inject all data that is needed as parameters
+# - We can kind of emulate named arguments
+# - For ELEMENT_XS, we want some elements to have no struct:
+#   - <initial>
+#   - Heterogeneous X macros
+#   - I think this is precipitate
+# - We should define structs inside E()
+# - We should leverage thid argument of E() to:
+#   - Side effects of children
+#   - How to collect children 
+#   - How to copy children
+# - Remove that cringe P parameter of X Macros, just man up
+# - Defining E(), AR(), AO(), CE(), CN(), CO() still feels very repetitive
+# - That counting thing is also very duplicate
 
 define(`RESETER',`define(`$1',`')ifelse($#,1,,`RESETER(shift($@))')')
 
@@ -49,8 +59,10 @@ define(`RESET_ALL',`RESETER(
 `CS',   dnl Child Separator
 `CNI',  dnl Child zero or more (N) Item
 `CNS',  dnl Child zero or more (N) Separator
-`COI',  dnl Child zero or One Item
-`COS',  dnl Child zero or One Separator
+`COI',  dnl Child zero or One (optional) Item
+`COS',  dnl Child zero or One (optional) Separator
+`CEI',  dnl Child Exactly (occurs) once Item
+`CES',  dnl Child Exactly (occurs) once Separator
 )')
 
 define(`E',
@@ -104,6 +116,13 @@ define(`CO',
 `'CI( $@)`'dnl
 `'dnl'dnl
 )
+define(`CE',
+  `C_SEP`'dnl
+`'define(`C_SEP',`CES`'CS')dnl
+`'CEI($@)`'dnl
+`'CI( $@)`'dnl
+`'dnl'dnl
+)
 define(`Q',
   `Q_SEP`'dnl
 `'define(`Q_SEP',`QS')dnl
@@ -113,12 +132,12 @@ define(`Q',
 
 define(`TAGS',`RESET_ALL`'$1`'RESETER(`E_SEP',`EA_SEP',`CU1')define(`CU2',``adv(E_LAST)'')`'dnl
 E(scxml,
-`'AO(initial,  Q(IDREFS, ` %set_initial'))
-`'AO(name,     Q(NMTOKEN,` %set_name'))
+`'AO(initial,  Q(IDREFS, ` %set_a_initial'))
+`'AO(name,     Q(NMTOKEN,` %set_a_name'))
 `'AR(xmlns,    Q("http://www.w3.org/2005/07/scxml"))
 `'AR(version,  Q("1.0"))
 `'AO(datamodel,Q("null"))
-`'AO(binding,  Q("early",` %set_early')Q("late",` %set_late'))
+`'AO(binding,  Q("early",` %set_a_early')Q("late",` %set_a_late'))
 `',
 `'CN(state,   )
 `'CN(parallel,)
@@ -127,8 +146,8 @@ E(scxml,
 `'CO(script,  )
 )
 E(state,
-`'AO(id,     Q(ID,    ` %set_id'))
-`'AO(initial,Q(IDREFS,` %set_initial'))
+`'AO(id,     Q(ID,    ` %set_a_id'))
+`'AO(initial,Q(IDREFS,` %set_a_initial'))
 `',
 `'CN(onentry,  )
 `'CN(onexit,   )
@@ -142,7 +161,7 @@ E(state,
 `'CO(invoke,   )
 )
 E(parallel,
-`'AO(id, Q(ID,` %set_id'))
+`'AO(id, Q(ID,` %set_a_id'))
 `',
 `'CN(onentry,  )
 `'CN(onexit,   )
@@ -157,16 +176,16 @@ define(`CU1',`adv(,E_LAST)')define(`CU2',`adv(transition)')dnl
 E(transition,
 `'AO(event, Q(EventsTypes_datatype))
 `'AO(cond,  Q(Boolean_expression))
-`'AO(target,Q(IDREFS,` %set_target'))
-`'AO(type,  Q("internal",` %set_internal')Q("external",` %set_external'))
+`'AO(target,Q(IDREFS,` %set_a_target'))
+`'AO(type,  Q("internal",` %set_a_internal')Q("external",` %set_a_external'))
 `',
 dnl`'CN(TODO)
 )
 E(initial,,
-`'CN(transition)
+`'CE(transition)
 )
 E(final,
-`'AO(id, Q(IDREFS,` %set_id'))
+`'AO(id, Q(IDREFS,` %set_a_id'))
 `',
 `'CN(onentry,)
 `'CN(onexit, )
@@ -179,13 +198,13 @@ E(onexit,,
 dnl`'CN(TODO)
 )
 E(history,
-`'AO(id,  Q(ID,` %set_id'))
-`'AO(type,Q("deep",` %set_deep')Q("shallow",` %set_shallow'))
+`'AO(id,  Q(ID,` %set_a_id'))
+`'AO(type,Q("deep",` %set_a_deep')Q("shallow",` %set_a_shallow'))
 `',
-`'CN(transition)
+`'CE(transition)
 )
 E(raise,
-`'AR(event,Q(NMTOKEN,` %set_event'))
+`'AR(event,Q(NMTOKEN,` %set_a_event'))
 `',
 )
 E(datamodel)
@@ -211,9 +230,22 @@ define(`EVAL_COUNTS2',`dnl
 `'define(`ARI',`1')
 ')
 
+define(`EVAL_COUNTS3',`dnl
+`'define(`EI',`define($''``1_CE_cnt, len($'`3))')
+`'define(`CEI',`1')
+')
+
+define(`EVAL_COUNTS4',`dnl
+`'define(`EI',`define($''``1_CM_cnt, len($'`3))')
+`'define(`CEI',`1')
+`'define(`COI',`1')
+')
+
 TAGS(`EVAL_WIDS')
 TAGS(`EVAL_COUNTS')
 TAGS(`EVAL_COUNTS2')
+TAGS(`EVAL_COUNTS3')
+TAGS(`EVAL_COUNTS4')
 
 define(`AS_ENUM_ATTRIBUTE',`dnl
 `'define(`EIA',`$'`2')dnl
@@ -237,12 +269,28 @@ define(`AS_ENUM_CHILDREN',`dnl
 `'define(`CS',`nl              CU2| ')dnl
 ')
 
+define(`AS_ENUM_CHILDREN_ONE_MIN',`dnl
+`'define(`EI',`CHILDREN_ONE_MIN_`'upper($'`1) adv(,E_LAST)= ifelse($'`1_CE_cnt,0,0,$'`3)')dnl
+`'define(`ES',`,nl    ')dnl
+`'define(`CEI',`1 << ELEMENT_`'upper($'`1)')dnl
+`'define(`CES',`nl                       adv(transition)| ')dnl
+')
+
+define(`AS_ENUM_CHILDREN_ONE_MAX',`dnl
+`'define(`EI',`CHILDREN_ONE_MAX_`'upper($'`1) adv(,E_LAST)= ifelse($'`1_CM_cnt,0,0,$'`3)')dnl
+`'define(`ES',`,nl    ')dnl
+`'define(`CEI',`1 << ELEMENT_`'upper($'`1)')dnl
+`'define(`COI',`1 << ELEMENT_`'upper($'`1)')dnl
+`'define(`CES',`nl                      adv(transition)| ')dnl
+`'define(`COS',`nl                      adv(transition)| ')dnl
+')
+
 define(`AS_ACTION_SET',`dnl
-`'define(`EI',`action set_$'`1 adv(,$'`1){ element = ELEMENT_`'upper($'`1); adv(,$'`1)}')dnl
+`'define(`EI',`action set_e_$'`1 adv(,$'`1){ element = ELEMENT_`'upper($'`1); adv(,$'`1)puts("set $'`1");}')dnl
 `'define(`ES',`nl    ')dnl
 ')
 
-define(`HAVE_MACHINE',`"$1" adv(,$1)@set_$1')
+define(`HAVE_MACHINE',`"$1" adv(,$1)@set_e_$1')
 
 define(`AS_MACHINE_ELEM_END',`dnl
 `'define(`EI',`HAVE_MACHINE($'`1)')dnl
@@ -268,12 +316,12 @@ define(`AS_ATTRIBUTE',`dnl
 ')
 
 define(`AS_ATTRIBUTE_CHECK',`dnl
-`'define(`EIAR',`action check_required_$'`1 { assert(mask == (mask & REQUIRED_`'upper($'`1))); }')dnl
+`'define(`EIAR',`action check_required_$'`1 { assert(mask == (mask & REQUIRED_`'upper($'`1))); puts("checking atts of $'`1");}')dnl
 `'define(`ESAR',`nl    ')dnl
 ')
 
 define(`AS_X',`dnl
-`'define(`EI',`X(P, upper($'`1))')dnl
+`'define(`EI',`X(P, upper($'`1)`'adv(,$'`1), $'`1`'adv(,$'`1))')dnl
 `'define(`ES',`S \nl')dnl
 ')
 
@@ -295,7 +343,9 @@ enum required
 
 enum children
 {
-    TAGS(`AS_ENUM_CHILDREN')
+    TAGS(`AS_ENUM_CHILDREN'),
+    TAGS(`AS_ENUM_CHILDREN_ONE_MIN'),
+    TAGS(`AS_ENUM_CHILDREN_ONE_MAX')
 };
 divert(3)dnl
 %%{

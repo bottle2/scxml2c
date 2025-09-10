@@ -9,10 +9,11 @@
 
 #define NIL
 #define COMMA ,
-#define AS_ENUM(P, A) P##A
 
-#define AS_ENUM2(P, U, L) P##_##U
+#define AS_ENUM(P, U, L) P##U
 #define AS_PTR( P, U, L) struct L *L
+#define AS_MEMB(P, U, L) struct L L
+/* TODO Do away with this P parameter. */
 
 #include "element.h"
 
@@ -31,14 +32,19 @@
  * fr  full range
  */
 
+/* TODO
+ * Standardize erros:
+ * - Unique numbers
+ * - Report line and cols
+ * - Simplify the whole ordeal
+ * - See how to parameterize with more info when needed
+ */
+
 static enum enc {
     ENC_NONE, ENC_UTF8, ENC_UTF16BE, ENC_UTF16LE = 4, ENC_UTF16 = 6
 } enc = 0;
 
-struct state    { int dummy; };
-struct parallel { int dummy; };
-struct final    { int dummy; };
-struct history  { int dummy; };
+/* Gerenciar a memória dessas listas encadeadas vai ser gostoso */
 
 #define ID_XS(X, S, P)    \
 X(P, STATE   , state   )S \
@@ -48,13 +54,86 @@ X(P, HISTORY , history )
 
 struct id
 {
-    enum  { ID_XS(AS_ENUM2, COMMA, ID )  } type;
-    union { ID_XS(AS_PTR  , ;    , NIL); } penis;
+    enum  { ID_XS(AS_ENUM, COMMA, ID_)  } type;
+    union { ID_XS(AS_PTR , ;    , NIL); } penis;
 };
 
-struct transition
+struct state
 {
-    struct id *target;
+    struct state    *first_child_state;
+    struct parallel *first_child_parallel;
+
+    struct id initial;
+    struct history *first_history;
+
+    struct state *next;
+
+    /* TODO Transitions */
+};
+
+struct parallel
+{
+    struct state    *first_child_state;
+    struct parallel *first_child_parallel;
+
+    struct history  *first_history;
+
+    struct parallel *next;
+};
+
+struct final
+{
+    struct final *next;
+};
+
+struct history
+{
+    enum depth { DEPTH_SHALLOW, DEPTH_DEEP } depth;
+    struct history *next;
+    struct id first_default;
+};
+
+static struct scxml
+{
+    struct state    *first_child_state;
+    struct parallel *first_child_parallel;
+    struct final    *first_child_final;
+
+    struct id initial;
+} scxml;
+
+struct transition { int fuck; };
+struct initial { int fuck; };
+struct onentry { int fuck; };
+struct onexit { int fuck; };
+struct raise { int fuck; };
+struct datamodel { int fuck; };
+struct donedata { int fuck; };
+struct content { int fuck; };
+struct invoke { int fuck; };
+struct script { int fuck; };
+
+static struct builder
+{
+    enum element element;
+    union {
+        ELEMENT_XS(NIL, AS_MEMB, ;);
+    } fuck;
+    unsigned mask;
+} nodes[1000];
+static int n_node = 0;
+
+static unsigned mask;
+
+static enum element element;
+
+static int parents[1000];
+static int n_parent = 0;
+
+enum /* This is extremely *** */
+{
+    MAX_NODE = sizeof (nodes) / sizeof (*nodes),
+    MAX_PARENT = sizeof (parents) / sizeof (*parents)
 };
 
 /* Thanks Simon Tatham. */
@@ -97,10 +176,6 @@ int utf8encode(unsigned char *s, long cp)
 static int lineno = 0;
 static int colno = 0;
 
-static enum element element;
-
-static unsigned mask;
-
 struct lbuffer
 {
     long it[1000];
@@ -132,6 +207,132 @@ static void entities_deinit(struct entities *es)
 {
     raxStop(&es->iter);
     raxFree(es->em);
+}
+
+static void push_element(void)
+{
+    if (1 == n_node && 0 == n_parent)
+    {
+        fprintf(stderr, "%d:%d: there shall be only one root\n", lineno, colno);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Pushing ");
+    switch (element)
+    {
+        #define AS_CASE(P, U, L) case P##U: puts(#L); break
+        ELEMENT_XS(ELEMENT_, AS_CASE, ;);
+        #undef AS_CASE
+        default: assert(!"Invalid element"); break;
+    }
+    assert(n_node < MAX_NODE);
+
+    if (0 == n_parent)
+    {
+        if (element != ELEMENT_SCXML)
+        {
+            fprintf(stderr, "%d:%d: only <scxml> allowed as root\n", lineno, colno);
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        unsigned allowed;
+        unsigned max;
+
+        switch (nodes[parents[n_parent - 1]].element)
+        {
+            #define AS_ALLOWED(P, U, L) case P##U: allowed = CHILDREN_##U; max = CHILDREN_ONE_MAX_##U; break
+            ELEMENT_XS(ELEMENT_, AS_ALLOWED, ;);
+            #undef AS_ALLOWED
+            default: assert(!"Invalid ele"); break;
+        }
+        if (!(allowed & (1 << element)))
+        {
+            fprintf(stderr, "%d:%d: element X not allowed as child of Y\n", lineno, colno);
+            exit(EXIT_FAILURE);
+        }
+        if (max & nodes[parents[n_parent - 1]].mask & (1 << element))
+        {
+            fprintf(stderr, "%d:%d: element can occcur at most once as child of\n", lineno, colno);
+            exit(EXIT_FAILURE);
+        }
+        nodes[parents[n_parent - 1]].mask |= 1 << element;
+    }
+
+#if 0
+    // TODO Dot the fuck here like counting children.
+    switch (nodes[parents[n_parent - 1]].element)
+    {
+        default: break;
+    }
+#endif
+
+    parents[n_parent++] = n_node;
+    nodes[n_node++].element = element;
+}
+
+static void pop_element(void)
+{
+    assert(n_node > 0);
+
+    printf("Popping ");
+    switch (element)
+    {
+        #define AS_CASE(P, U, L) case P##U: puts(#L); break
+        ELEMENT_XS(ELEMENT_, AS_CASE, ;);
+        #undef AS_CASE
+        default: assert(!"Invalid element"); break;
+    }
+
+#if 0
+    int n_state = 0;
+    int n_parallel = 0;
+#endif
+
+#if 0
+    for (int i = n_node; i >= parents[n_parent]; i--)
+    {
+    }
+#endif
+
+    n_parent--;
+
+    if (n_parent > 0)
+    {
+        unsigned min;
+        switch (nodes[parents[n_parent]].element)
+        {
+            #define AS_CASE(P, U, L) case P##U: min = CHILDREN_ONE_MIN_##U; break
+            ELEMENT_XS(ELEMENT_, AS_CASE, ;);
+            #undef AS_CASE
+            default: assert(!"Invalid element"); break;
+        }
+        if (min != (min & nodes[parents[n_parent]].mask))
+        {
+            fprintf(stderr, "%d:%d: missing min elements for X\n", lineno, colno);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    printf("Had %d children\n", n_node - parents[n_parent] - 1);
+    n_node = parents[n_parent] + 1;
+
+    if (ELEMENT_SCXML == element)
+    {
+        assert(0 == n_parent);
+        assert(1 == n_node);
+
+        puts("TODO wrap up <scxml/>");
+    }
+
+#if 0
+    if (nodes[--n_node].element != element)
+    {
+        fprintf(stderr, "%d:%d: Tag mismatch\n", lineno, colno);
+        exit(EXIT_FAILURE);
+    }
+#endif
 }
 
 %%{
@@ -415,19 +616,23 @@ static void entities_deinit(struct entities *es)
     ## 43 https://www.w3.org/TR/xml/#NT-content
     # XXX Unused because recursion
 
-    action pop_element { }
-    action push_element { }
-    action set_name { }
+    # TODO We need to turn those actions into functions, because -G2 copies a lot
+
+    action push_element { push_element(); }
+    action pop_element { pop_element(); }
+
+    action set_a_initial { puts("attr initial"); }
+    action set_a_name { puts("attr name"); }
     action reset_mask { }
-    action set_event { }
-    action set_id { }
-    action set_target { }
-    action set_early { }
-    action set_late { }
-    action set_deep { }
-    action set_shallow { }
-    action set_external { }
-    action set_internal { }
+    action set_a_event { puts("attr event"); }
+    action set_a_id { puts("attr id"); }
+    action set_a_target { puts("attr target"); }
+    action set_a_early { puts("attr early"); }
+    action set_a_late { puts("attr late"); }
+    action set_a_deep { puts("attr deep"); }
+    action set_a_shallow { puts("attr shallow"); }
+    action set_a_external { puts("attr external"); }
+    action set_a_internal { puts("attr internal"); }
 
     IDREFS = Names;
     NMTOKEN = Nmtokens;
@@ -452,7 +657,7 @@ static void entities_deinit(struct entities *es)
             ((elementActual2 | Reference | CDSect | PI | Comment)
              CharData?
             )*;
-    elementActual1 = EmptyElemTagOrSTag content;
+    elementActual1 = EmptyElemTagOrSTag :> content;
     document = prolog elementActual1 <: Misc*;
     # This is the hack to handle element recursion
 
