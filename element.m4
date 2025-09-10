@@ -326,6 +326,9 @@ define(`AS_X',`dnl
 ')
 
 divert(2)dnl
+#ifndef ELEMENT_H
+#define ELEMENT_H
+
 #define ELEMENT_XS(P, X, S) \
 TAGS(`AS_X')
 
@@ -347,6 +350,8 @@ enum children
     TAGS(`AS_ENUM_CHILDREN_ONE_MIN'),
     TAGS(`AS_ENUM_CHILDREN_ONE_MAX')
 };
+
+#endif
 divert(3)dnl
 %%{
     machine token;

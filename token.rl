@@ -60,44 +60,48 @@ struct id
 
 struct state
 {
-    struct state    *first_child_state;
-    struct parallel *first_child_parallel;
+    struct state *states;
+    int n_state;
+    struct parallel *parallels;
+    int n_parallel;
 
     struct id initial;
-    struct history *first_history;
-
-    struct state *next;
+    struct history *history;
+    int n_history;
 
     /* TODO Transitions */
 };
 
 struct parallel
 {
-    struct state    *first_child_state;
-    struct parallel *first_child_parallel;
+    struct state *states;
+    int n_state;
+    struct parallel *parallel;
+    int n_parallel;
 
-    struct history  *first_history;
-
-    struct parallel *next;
+    struct history *history;
+    int n_history;
 };
 
 struct final
 {
-    struct final *next;
+    int dummy;
 };
 
 struct history
 {
     enum depth { DEPTH_SHALLOW, DEPTH_DEEP } depth;
-    struct history *next;
-    struct id first_default;
+    struct id _default;
 };
 
 static struct scxml
 {
-    struct state    *first_child_state;
-    struct parallel *first_child_parallel;
-    struct final    *first_child_final;
+    struct state *states;
+    int n_state;
+    struct parallel *parallels;
+    int n_parallel;
+    struct final *finals;
+    int n_final;
 
     struct id initial;
 } scxml;
@@ -113,12 +117,39 @@ struct content { int fuck; };
 struct invoke { int fuck; };
 struct script { int fuck; };
 
+static char * element_string(enum element e)
+{
+    switch (e)
+    {
+        #define AS_STR(P, U, L) case P##U: return #L
+        ELEMENT_XS(ELEMENT_, AS_STR, ;);
+        #undef AS_STR
+        default: assert(!"Invalid element"); break;
+    }
+
+    return NULL;
+}
+
+static void print_state(int level, struct state *s)
+{
+    printf("%*.0ssome state\n", level, "");
+    for (int i = 0; i < s->n_state; i++)
+        print_state(level + 1, s->states + i);
+}
+
+static void print_tree(struct scxml *it)
+{
+    puts("root:");
+    for (int i = 0; i < it->n_state; i++)
+        print_state(1, it->states + i);
+}
+
 static struct builder
 {
     enum element element;
     union {
         ELEMENT_XS(NIL, AS_MEMB, ;);
-    } fuck;
+    } e;
     unsigned mask;
 } nodes[1000];
 static int n_node = 0;
@@ -130,11 +161,9 @@ static enum element element;
 static int parents[1000];
 static int n_parent = 0;
 
-enum /* This is extremely *** */
-{
-    MAX_NODE = sizeof (nodes) / sizeof (*nodes),
-    MAX_PARENT = sizeof (parents) / sizeof (*parents)
-};
+#define DECL_MAX(ARR, NAME) enum { NAME##_MAX = sizeof (ARR) / sizeof (*ARR) }
+DECL_MAX(nodes, NODE);
+DECL_MAX(parents, PARENT);
 
 /* Thanks Simon Tatham. */
 #define crBegin static int state=0; switch(state) { case 0:
@@ -175,6 +204,17 @@ int utf8encode(unsigned char *s, long cp)
 
 static int lineno = 0;
 static int colno = 0;
+
+static void * malloc2(size_t n)
+{
+    void *obj = malloc(n);
+    if (!obj)
+    {
+        fprintf(stderr, "%d:%d: OOM\n", lineno, colno);
+        exit(EXIT_FAILURE);
+    }
+    return obj;
+}
 
 struct lbuffer
 {
@@ -217,15 +257,9 @@ static void push_element(void)
         exit(EXIT_FAILURE);
     }
 
-    printf("Pushing ");
-    switch (element)
-    {
-        #define AS_CASE(P, U, L) case P##U: puts(#L); break
-        ELEMENT_XS(ELEMENT_, AS_CASE, ;);
-        #undef AS_CASE
-        default: assert(!"Invalid element"); break;
-    }
-    assert(n_node < MAX_NODE);
+    printf("Pushing %s\n", element_string(element));
+
+    assert(n_node < NODE_MAX);
 
     if (0 == n_parent)
     {
@@ -258,15 +292,46 @@ static void push_element(void)
             exit(EXIT_FAILURE);
         }
         nodes[parents[n_parent - 1]].mask |= 1 << element;
+
+        switch (nodes[parents[n_parent - 1]].element)
+        {
+            case ELEMENT_SCXML:
+            switch (element)
+            {
+                case ELEMENT_STATE:
+                    nodes[parents[n_parent - 1]].e.scxml.n_state++;
+                break;
+
+                default: /* Others unhandled. */ break;
+            }
+            break;
+
+            case ELEMENT_STATE:
+            switch (element)
+            {
+                case ELEMENT_STATE:
+                    nodes[parents[n_parent - 1]].e.state.n_state++;
+                break;
+
+                default: /* Others unhandled. */ break;
+            }
+            break;
+
+            default: /* Nothing for now. */ break;
+        }
     }
 
-#if 0
-    // TODO Dot the fuck here like counting children.
-    switch (nodes[parents[n_parent - 1]].element)
+    /* TODO Automate this. */
+    switch (element)
     {
-        default: break;
+        case ELEMENT_SCXML:
+            nodes[n_node].e.scxml.n_state = 0;
+        break;
+        case ELEMENT_STATE:
+            nodes[n_node].e.state.n_state = 0;
+        break;
+        default: /* Do nothing. */ break;
     }
-#endif
 
     parents[n_parent++] = n_node;
     nodes[n_node++].element = element;
@@ -276,27 +341,44 @@ static void pop_element(void)
 {
     assert(n_node > 0);
 
-    printf("Popping ");
-    switch (element)
-    {
-        #define AS_CASE(P, U, L) case P##U: puts(#L); break
-        ELEMENT_XS(ELEMENT_, AS_CASE, ;);
-        #undef AS_CASE
-        default: assert(!"Invalid element"); break;
-    }
-
-#if 0
-    int n_state = 0;
-    int n_parallel = 0;
-#endif
-
-#if 0
-    for (int i = n_node; i >= parents[n_parent]; i--)
-    {
-    }
-#endif
+    printf("Popping %s\n", element_string(element));
 
     n_parent--;
+
+    struct state *states;
+
+    switch (element)
+    {
+        case ELEMENT_SCXML:
+            states = nodes[parents[n_parent]].e.scxml.states = malloc2(sizeof (struct state) * nodes[parents[n_parent]].e.scxml.n_state);
+             
+        break;
+
+        case ELEMENT_STATE:
+            states = nodes[parents[n_parent]].e.state.states = malloc2(sizeof (struct state) * nodes[parents[n_parent]].e.state.n_state);
+        break;
+
+        default:
+            /* FUCK */
+        break;
+    }
+
+    int state_i = 0;
+
+    /* Pointer smartassness here. */
+
+    /* Collect children. */
+    for (int i = parents[n_parent] + 1; i < n_node; i++)
+    {
+        switch (nodes[i].element)
+        {
+            case ELEMENT_STATE:
+                states[state_i++] = nodes[i].e.state;
+            break;
+
+            default: /* Nothing for now */ break;
+        }
+    }
 
     if (n_parent > 0)
     {
@@ -323,7 +405,7 @@ static void pop_element(void)
         assert(0 == n_parent);
         assert(1 == n_node);
 
-        puts("TODO wrap up <scxml/>");
+        scxml = nodes[0].e.scxml;
     }
 
 #if 0
@@ -810,9 +892,10 @@ int main(void)
             , ".utf8"
             , ".utf-8"
         };
-        for (i = 0; !setlocale(LC_ALL, locales[i]); i++)
+        DECL_MAX(locales, LOCALE);
+        for (i = 0; i < LOCALE_MAX && !setlocale(LC_ALL, locales[i]); i++)
             ;
-        if (sizeof(locales)/sizeof(*locales) == i)
+        if (LOCALE_MAX == i)
             fprintf(stderr, "UTF-8 output not setup, might be garbled.\n");
     }
 
@@ -825,8 +908,8 @@ int main(void)
     }
 
     long usv; // Unicode Scalar Value
-    #define POSTPONE_MAX 3
-    long postpone[POSTPONE_MAX];
+    long postpone[3];
+    DECL_MAX(postpone, POSTPONE);
     int n_postpone = 0;
     int cs;
 
@@ -991,6 +1074,8 @@ int main(void)
 
     entities_debug(&ges, "general entities", "  ");
     entities_debug(&pes, "parameter entities", "% ");
+
+    print_tree(&scxml);
 
     puts("Events\tOccurrences");
 
