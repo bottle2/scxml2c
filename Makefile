@@ -1,5 +1,6 @@
-CFLAGS=-ferror-limit=1 -std=c99 -Wpedantic -Wall -Wextra -Wno-string-plus-int -fsanitize=address,undefined,bounds
+CFLAGS=-ferror-limit=1 -std=c99 -Wpedantic -Wall -Wextra -Wno-string-plus-int #-fsanitize=address,undefined,bounds -g3 -Og
 #CFLAGS=-std=c99 -Wpedantic -Wall -Wextra -g3 -Og
+#CFLAGS=-std=c99 -Wpedantic -Wall -Wextra -Wno-string-plus-int -O3 -flto -march=native
 
 OBJECT=rax.o
 
@@ -28,9 +29,10 @@ rax_malloc.h:
 	curl $(RAW_RAX)/$@ > $@
 
 rax.o:rax.c rax.h rax_malloc.h
+	$(CC) $(CFLAGS) -c $<
 	
 clean:
-	rm -f token token.c element.h element.rl
+	rm -f token token.c element.h element.rl $(OBJECT)
 
 .SUFFIXES:.c .rl
 

@@ -15,7 +15,16 @@
 #define AS_MEMB(P, U, L) struct L L
 /* TODO Do away with this P parameter. */
 
+/* TODO We want children that occur N times to remain on nodes stack,
+ * but children that only occur once, just process them at once.
+ * This thing mixing code generation gets ugly real fast,
+ * but maybe there is more power to untap. */
+
+/* TODO Code would be simpler if there was always a parent, always a virtual root kind of */
+
 #include "element.h"
+
+#define PROG_NAME "token"
 
 /* I'm positive _someone_ MUST have created some kind of XML schema to
    C generator, this is pointless... whatever. */
@@ -30,14 +39,6 @@
  * le  little-endian
  * be  big-endian
  * fr  full range
- */
-
-/* TODO
- * Standardize erros:
- * - Unique numbers
- * - Report line and cols
- * - Simplify the whole ordeal
- * - See how to parameterize with more info when needed
  */
 
 static enum enc {
@@ -165,16 +166,7 @@ static int n_parent = 0;
 DECL_MAX(nodes, NODE);
 DECL_MAX(parents, PARENT);
 
-/* Thanks Simon Tatham. */
-#define crBegin static int state=0; switch(state) { case 0:
-#define crYield do { state=__LINE__; return; case __LINE__:; } while (0)
-#define crFinish } (void)0
-
 #define UNICODE_REPLACEMENT_CHARACTER 0xFFFD
-
-#define CHECK(C) if (!(C)) { \
-    fprintf(stderr, "%s:%d: (%s) failed\n", __FILE__, __LINE__, #C); exit(1); \
-} else (void)0
 
 /* Copyright (c) 2025 Chris Wellons
  * This is free and unencumbered software released into the public domain.
@@ -205,16 +197,43 @@ int utf8encode(unsigned char *s, long cp)
 static int lineno = 0;
 static int colno = 0;
 
-static void * malloc2(size_t n)
-{
-    void *obj = malloc(n);
-    if (!obj)
-    {
-        fprintf(stderr, "%d:%d: OOM\n", lineno, colno);
-        exit(EXIT_FAILURE);
-    }
-    return obj;
-}
+/* Error rationale:
+ * - A message is not needed, because:
+ *   - The label should be concise and spell out the problem
+ *   - Knowing location of error is more useful to debug
+ *     - This also makes printing data unnecessary
+ * - Integer code is not printed, because:
+ *   - It will change from version to version
+ *   - It is not searchable (the label is, however) 
+ * TODO
+ * - Actually write useful labels
+ * - Fuck.
+ * - Error reporting is that one thing that everyone has their own ideas,
+ *   everyone does their own way.
+ * - Honestly. I don't know.
+ * - Fuck. I'm not happy. I feel like I'm consfusing things.
+ */
+
+#define ERROR_XS(X) \
+X(OOM                 ), \
+X(ONLY_ONE_ROOT       ), \
+X(ROOT_MUST_BE_SCXML  ), \
+X(WRONG_CHILD         ), \
+X(CHILD_AT_MOST_ONCE  ), \
+X(MISSING_CHILD       ), \
+X(TAG_MISMATCH        ), \
+X(EXTERNAL_UNSUPPORTED), \
+X(OTHER_ERROR         ), \
+X(ENCODING_MISMATCH   )
+
+#define AS_ENUM2(C) ERROR_##C
+enum { ERROR_XS(AS_ENUM2) };
+#undef AS_ENUM2
+
+#define DIE(CODE, COND) if (COND) { \
+    fprintf(stderr, "-:%d:%d: Error " #CODE ": %s (" PROG_NAME ":%s:%d)\n", \
+        lineno, colno, #COND, __FILE__, __LINE__ \
+    ); exit(EXIT_FAILURE); } else (void)ERROR_##CODE
 
 struct lbuffer
 {
@@ -224,8 +243,9 @@ struct lbuffer
 
 #define ADJ(IT) (unsigned char *)(IT).it, (IT).len * sizeof (*(IT).it)
 
-struct lbuffer lbuf;
-static int skip;
+struct lbuffer lbuf1;
+struct lbuffer lbuf2;
+struct lbuffer *lbuf;
 
 struct entities { rax *em; raxIterator iter; };
 
@@ -235,11 +255,7 @@ struct entities *ces; /* Current entities */
 
 static void entities_init(struct entities *es)
 {
-    if (!(es->em = raxNew()))
-    {
-        fprintf(stderr, "OOM for raxorzzz\n");
-        exit(EXIT_FAILURE);
-    }
+    DIE(OOM, !(es->em = raxNew()));
     raxStart(&es->iter, es->em);
 }
 
@@ -251,11 +267,9 @@ static void entities_deinit(struct entities *es)
 
 static void push_element(void)
 {
-    if (1 == n_node && 0 == n_parent)
-    {
-        fprintf(stderr, "%d:%d: there shall be only one root\n", lineno, colno);
-        exit(EXIT_FAILURE);
-    }
+    DIE(ONLY_ONE_ROOT, 1 == n_node && 0 == n_parent);
+
+    struct builder *parent = n_parent ? nodes + parents[n_parent - 1] : NULL;
 
     printf("Pushing %s\n", element_string(element));
 
@@ -263,43 +277,34 @@ static void push_element(void)
 
     if (0 == n_parent)
     {
-        if (element != ELEMENT_SCXML)
-        {
-            fprintf(stderr, "%d:%d: only <scxml> allowed as root\n", lineno, colno);
-            exit(EXIT_FAILURE);
-        }
+        DIE(ROOT_MUST_BE_SCXML, element != ELEMENT_SCXML);
     }
     else
     {
         unsigned allowed;
         unsigned max;
 
-        switch (nodes[parents[n_parent - 1]].element)
+        switch (parent->element)
         {
             #define AS_ALLOWED(P, U, L) case P##U: allowed = CHILDREN_##U; max = CHILDREN_ONE_MAX_##U; break
             ELEMENT_XS(ELEMENT_, AS_ALLOWED, ;);
             #undef AS_ALLOWED
             default: assert(!"Invalid ele"); break;
         }
-        if (!(allowed & (1 << element)))
-        {
-            fprintf(stderr, "%d:%d: element X not allowed as child of Y\n", lineno, colno);
-            exit(EXIT_FAILURE);
-        }
-        if (max & nodes[parents[n_parent - 1]].mask & (1 << element))
-        {
-            fprintf(stderr, "%d:%d: element can occcur at most once as child of\n", lineno, colno);
-            exit(EXIT_FAILURE);
-        }
-        nodes[parents[n_parent - 1]].mask |= 1 << element;
 
-        switch (nodes[parents[n_parent - 1]].element)
+        DIE(WRONG_CHILD, !(allowed & (1 << element)));
+
+        DIE(CHILD_AT_MOST_ONCE, max & nodes[parents[n_parent - 1]].mask & (1 << element));
+
+        parent->mask |= 1 << element;
+
+        switch (parent->element)
         {
             case ELEMENT_SCXML:
             switch (element)
             {
                 case ELEMENT_STATE:
-                    nodes[parents[n_parent - 1]].e.scxml.n_state++;
+                    parent->e.scxml.n_state++;
                 break;
 
                 default: /* Others unhandled. */ break;
@@ -310,7 +315,7 @@ static void push_element(void)
             switch (element)
             {
                 case ELEMENT_STATE:
-                    nodes[parents[n_parent - 1]].e.state.n_state++;
+                    parent->e.state.n_state++;
                 break;
 
                 default: /* Others unhandled. */ break;
@@ -350,12 +355,14 @@ static void pop_element(void)
     switch (element)
     {
         case ELEMENT_SCXML:
-            states = nodes[parents[n_parent]].e.scxml.states = malloc2(sizeof (struct state) * nodes[parents[n_parent]].e.scxml.n_state);
+            states = nodes[parents[n_parent]].e.scxml.states = malloc(sizeof (struct state) * nodes[parents[n_parent]].e.scxml.n_state);
+            DIE(OOM, !states);
              
         break;
 
         case ELEMENT_STATE:
-            states = nodes[parents[n_parent]].e.state.states = malloc2(sizeof (struct state) * nodes[parents[n_parent]].e.state.n_state);
+            states = nodes[parents[n_parent]].e.state.states = malloc(sizeof (struct state) * nodes[parents[n_parent]].e.state.n_state);
+            DIE(OOM, !states);
         break;
 
         default:
@@ -390,11 +397,7 @@ static void pop_element(void)
             #undef AS_CASE
             default: assert(!"Invalid element"); break;
         }
-        if (min != (min & nodes[parents[n_parent]].mask))
-        {
-            fprintf(stderr, "%d:%d: missing min elements for X\n", lineno, colno);
-            exit(EXIT_FAILURE);
-        }
+        DIE(MISSING_CHILD, min != (min & nodes[parents[n_parent]].mask));
     }
 
     printf("Had %d children\n", n_node - parents[n_parent] - 1);
@@ -408,13 +411,7 @@ static void pop_element(void)
         scxml = nodes[0].e.scxml;
     }
 
-#if 0
-    if (nodes[--n_node].element != element)
-    {
-        fprintf(stderr, "%d:%d: Tag mismatch\n", lineno, colno);
-        exit(EXIT_FAILURE);
-    }
-#endif
+    DIE(TAG_MISMATCH, nodes[n_node - 1].element != element);
 }
 
 %%{
@@ -459,56 +456,31 @@ static void pop_element(void)
     PEReference = '%' Name ';';
     # 69 https://www.w3.org/TR/xml/#NT-PEReference
 
-    action buf_reset { lbuf.len = 0; }
-    action buf { lbuf.it[lbuf.len++] = fc; }
-
-    action entities_locate
-    {
-        if ((skip = !raxTryInsert(ces->em, ADJ(lbuf), NULL, NULL)))
-        {
-            fprintf(stderr, "%d:%d: Repeated entity declaration ignored.\n", lineno, colno);
-        }
-        else
-        {
-            if (ENOMEM == errno)
-            {
-                fprintf(stderr, "SUICIDE\n");
-                exit(EXIT_FAILURE);
-            };
-
-            if (0 == raxSeek(&ces->iter, "==", ADJ(lbuf)))
-            {
-                fprintf(stderr, "FUCK FOR WHATEVER REASON\n");
-                exit(EXIT_FAILURE);
-            }
-
-            if (0 == raxNext(&ces->iter))
-            {
-                fprintf(stderr, "ANOTHER FUCK\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-    }
+    action buf_1 { lbuf = &lbuf1; }
+    action buf_2 { lbuf = &lbuf2; }
+    action buf_reset { lbuf->len = 0; }
+    action buf { lbuf->it[lbuf->len++] = fc; }
 
     action entities_store
     {
-        if (!skip)
+        long *copy = malloc((lbuf2.len + 1) * sizeof (long)); 
+        DIE(OOM, !copy);
+        *copy = lbuf2.len;
+        memcpy(copy + 1, lbuf2.it, (ADJ(lbuf2)));
+
+        if (!raxTryInsert(ces->em, ADJ(lbuf1), copy, NULL))
         {
-            long *copy = malloc((lbuf.len + 1) * sizeof (long)); 
-            if (!copy)
-            {
-                fprintf(stderr, "FRRREEEEEEE MEEE");
-                exit(EXIT_FAILURE);
-            }
-            *copy = lbuf.len;
-            memcpy(copy + 1, lbuf.it, (ADJ(lbuf)));
-            raxSetData(ces->iter.node, copy);
+            free(copy);
+
+            DIE(OOM, ENOMEM == errno);
+
+            fprintf(stderr, "%d:%d: Repeated entity declaration ignored.\n", lineno, colno);
         }
     }
 
-    EntityValue = ('"' ([^%&"] | PEReference | Reference)* >buf_reset $buf '"'
-                |  "'" ([^%&'] | PEReference | Reference)* >buf_reset $buf "'"
-                  ) >entities_locate %entities_store;
+    EntityValue = ('"' ([^%&"] | PEReference | Reference)* >buf_2 >buf_reset $buf '"'
+                |  "'" ([^%&'] | PEReference | Reference)* >buf_2 >buf_reset $buf "'"
+                  ) %entities_store;
     # 9 https://www.w3.org/TR/xml/#NT-EntityValue
     AttValue = '"' ([^<&"] | Reference)* '"'
              | "'" ([^<&'] | Reference)* "'";
@@ -540,11 +512,7 @@ static void pop_element(void)
     CDSect = CDStart CDData CDEnd;
     # 18 https://www.w3.org/TR/xml/#NT-CDSect
 
-    action external_unsupported
-    {
-        fprintf(stderr, "sorry kid\n");
-        exit(EXIT_FAILURE);
-    }
+    action external_unsupported { DIE(EXTERNAL_UNSUPPORTED, 1); }
 
     ExternalID = ("SYSTEM" S SystemLiteral
                | "PUBLIC" S PubidLiteral S SystemLiteral) >external_unsupported;
@@ -603,11 +571,11 @@ static void pop_element(void)
 
     EntityDef = EntityValue | (ExternalID NDataDecl?);
     # 73 https://www.w3.org/TR/xml/#NT-EntityDef
-    GEDecl = "<!ENTITY" S Name >entities_use_ges >buf_reset $buf S EntityDef S? '>';
+    GEDecl = "<!ENTITY" S Name >entities_use_ges >buf_1 >buf_reset $buf S EntityDef S? '>';
     # 71 https://www.w3.org/TR/xml/#NT-GEDecl
     PEDef = EntityValue | ExternalID;
     # 74 https://www.w3.org/TR/xml/#NT-PEDef
-    PEDecl = "<!ENTITY" S '%' %entities_use_pes S Name >buf_reset $buf S PEDef S? '>';
+    PEDecl = "<!ENTITY" S '%' %entities_use_pes S Name >buf_1 >buf_reset $buf S PEDef S? '>';
     # 72 https://www.w3.org/TR/xml/#NT-PEDecl
     EntityDecl = GEDecl | PEDecl;
     # 70 https://www.w3.org/TR/xml/#NT-EntityDecl
@@ -634,10 +602,10 @@ static void pop_element(void)
     VersionInfo = S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"');
     # 24 https://www.w3.org/TR/xml/#NT-VersionInfo
 
-    action check_utf8 { CHECK(ENC_UTF8 == enc); }
-    action check_utf16 { CHECK(ENC_UTF16 & enc); }
-    action check_utf16be { CHECK(ENC_UTF16BE == enc); }
-    action check_utf16le { CHECK(ENC_UTF16LE == enc); }
+    action check_utf8    { DIE(ENCODING_MISMATCH, enc != ENC_UTF8);    }
+    action check_utf16   { DIE(ENCODING_MISMATCH, !(ENC_UTF16 & enc)); }
+    action check_utf16be { DIE(ENCODING_MISMATCH, enc != ENC_UTF16BE); }
+    action check_utf16le { DIE(ENCODING_MISMATCH, enc != ENC_UTF16LE); }
 
     # https://www.iana.org/assignments/character-sets/character-sets.xhtml
     # Disabled names contain some character illegal in a XML EncName
@@ -774,10 +742,7 @@ static void pop_element(void)
     extParsedEnt = TextDecl? content;
     # 78 https://www.w3.org/TR/xml/#NT-extParsedEnt
 
-    action some_fucking_error {
-        fprintf(stderr,"%d:%d: BUCETA",lineno,colno);
-        exit(EXIT_FAILURE);
-    }
+    action some_fucking_error { DIE(OTHER_ERROR, 1); }
 
     main := document $!some_fucking_error;
 
@@ -859,7 +824,7 @@ static void entities_debug(struct entities *es, char *name, char *prefix)
     while (raxNext(&es->iter))
     {
         long *val = (long *)es->iter.key;
-        int len = es->iter.key_len / sizeof (*lbuf.it);
+        int len = es->iter.key_len / sizeof (long);
         printf("  %s\"", prefix);
         for (int i = 0; i < len; i++)
         {
@@ -870,7 +835,9 @@ static void entities_debug(struct entities *es, char *name, char *prefix)
         printf("\" ");
 
         val = (long *)es->iter.data;
+        assert(val != NULL);
         len = *val;
+        assert(len >= 0);
         val++;
         for (int i = 0; i < len; i++)
         {
